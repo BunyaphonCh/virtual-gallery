@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Long Gallery | Virtual Exhibition</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://font.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <canvas id="c"></canvas>
+
+    <div id="branding">
+        <div class="subtitle">VIRTUAL EXHIBITION</div>
+        <div class="title">The Long Gallery</div>
+    </div>
+
+    <canvas id="minimap"></canvas>
+    <div id="minimap-counter"><span id="current-idx"></span><span id="total-count">16</span></div>
+
+    <div id="overlay">
+        <div class="overlay-inner">
+            <div class="overlay-sub">VIRTUAL EXHIBITION</div>
+            <h1 class="overlay-title">The Long Gallery</h1>
+            <p class="overlay-desc">หอศิลป์จำลองง</p>
+            <button id="enter-btn">เข้าชม</button>
+            <div class="overlay-hint">
+                <span class="key">W A S D</span> เดิน &nbsp; &nbsp;
+                <span class="key">Mouse</span> หันมอง &nbsp; &nbsp;
+                <span class="key">Click ภาพ</span> ดูรายละเอียด &nbsp; &nbsp;
+                <span class="key">ESC</span> ออก
+            </div>
+        </div>
+    </div>
+
+    <div id="controls-bar">
+        <button id="audio-btn" class="ctrl-btn active">
+            <span class="dot"></span> เสียงบรรยากาศ
+        </button>
+        <button id="tour-btn" class="ctrl-btn">
+            <span class="icon">▶</span> ทัวร์อัตโนมัติ
+        </button>
+        <button id="help-btn" class="ctrl-btn">วิธีใช้</button>
+    </div>
+
+    <div id="hud-hint">WASD เดินชม · ลากเมาส์เพื่อหันมอง · คลิกที่ภาพเพื่อดู</div>
+
+    <div id="info-panel">
+        <button id="info-close">✕</button>
+        <div id="info-img-wrap">
+            <canvas id="info-thumb"></canvas>
+        </div>
+        <div id="info-body">
+            <div id="info-num"></div>
+            <div id="info-title"></div>
+            <div id="info-artist"></div>
+            <div id="info-meta">
+                <span id="info-year"></span>
+                <span id="info-technique"></span>
+            </div>
+            <p id="info-desc"></p>
+        </div>
+        <div id="info-nav">
+            <button id="info-prev">← ก่อนหน้า</button>
+            <button id="info-next">ถัดไป →</button>
+        </div>
+    </div>
+
+    <div id="joystick-zone">
+        <div id="joystick-base">
+            <div id="joystick-thumb"></div>
+        </div>
+    </div>
+
+    <div id="tour-label"></div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script type="module" src="main.js"></script>
+</body>
+</html>
