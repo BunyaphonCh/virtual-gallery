@@ -1,23 +1,36 @@
 const SPEED        = 0.055;
-const LOOK_SENS    = 0.0022;
+const LOOK_SENS    = 0.002;
 const MOBILE_SPEED = 0.045;
+const JUMP_FORCE   = 0.12;
+const GRAVITY      = 0.008;
+const EYE_HEIGHT   = 1.65;
+const PI_2         = Math.PI / 2;
 
 export class GalleryControls {
   constructor(camera, domElement) {
-    this.camera     = camera;
-    this.dom        = domElement;
-    this.locked     = false;
-    this.isMobile   = window.matchMedia('(pointer: coarse)').matches;
+    this.camera   = camera;
+    this.dom      = domElement;
+    this.locked   = false;
+    this.isMobile = window.matchMedia('(pointer: coarse)').matches;
+    this.keys     = {};
 
-    // Movement state
-    this.keys = {};
-    this.euler = new THREE.Euler(0, Math.PI, 0, 'YXZ'); // face down corridor
-    this.camera.quaternion.setFromEuler(this.euler);
+    // วิธีของ Three.js PointerLockControls:
+    // แยกกล้องออกเป็น 2 object ซ้อนกัน
+    // _pitchObject (X rotation) อยู่ใน _yawObject (Y rotation)
+    this._pitchObject = new THREE.Object3D();
+    this._pitchObject.add(camera);
 
-    // Joystick state (mobile)
-    this.joy = { active: false, startX: 0, startY: 0, dx: 0, dy: 0 };
-    // Look drag state (mobile, right half of screen)
-    this.look = { active: false, startX: 0, startY: 0, prevX: 0, prevY: 0 };
+    this._yawObject = new THREE.Object3D();
+    this._yawObject.position.y = EYE_HEIGHT;
+    this._yawObject.add(this._pitchObject);
+
+    // Jump
+    this._velY     = 0;
+    this._onGround = true;
+
+    // Mobile
+    this.joy  = { active: false, startX: 0, startY: 0, dx: 0, dy: 0 };
+    this.look = { active: false, prevX: 0, prevY: 0 };
 
     this._tmp = {
       dir:   new THREE.Vector3(),
@@ -29,121 +42,135 @@ export class GalleryControls {
     if (this.isMobile) this._initMobile();
   }
 
-  // ── Desktop ───────────────────────────────────────────────
+  // ตำแหน่งกล้องจริงๆ อ่านจาก _yawObject
+  get position() { return this._yawObject.position; }
+
   _initDesktop() {
     document.addEventListener('keydown', e => {
       this.keys[e.code] = true;
-      e.code === 'Escape' && this._unlock();
+      if (e.code === 'Escape') this._unlock();
+      if (e.code === 'Space' && this._onGround) {
+        this._velY     = JUMP_FORCE;
+        this._onGround = false;
+        e.preventDefault();
+      }
     });
-    document.addEventListener('keyup',   e => { this.keys[e.code] = false; });
+    document.addEventListener('keyup', e => { this.keys[e.code] = false; });
 
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.dom;
     });
+
     document.addEventListener('mousemove', e => {
       if (!this.locked) return;
-      this.euler.y -= e.movementX * LOOK_SENS;
-      this.euler.x -= e.movementY * LOOK_SENS;
-      this.euler.x  = Math.max(-Math.PI * 0.38, Math.min(Math.PI * 0.38, this.euler.x));
-      this.camera.quaternion.setFromEuler(this.euler);
+
+      // yaw = หมุนรอบ Y ของ _yawObject (ซ้าย-ขวา) → ไม่มี limit
+      this._yawObject.rotation.y   -= e.movementX * LOOK_SENS;
+
+      // pitch = หมุนรอบ X ของ _pitchObject (ขึ้น-ลง) → clamp ±89°
+      this._pitchObject.rotation.x -= e.movementY * LOOK_SENS;
+      this._pitchObject.rotation.x  = Math.max(-PI_2 + 0.01, Math.min(PI_2 - 0.01, this._pitchObject.rotation.x));
     });
   }
 
   lock() {
-    if (!this.isMobile) {
-      this.dom.requestPointerLock?.();
-    } else {
-      this.locked = true;
-    }
+    if (!this.isMobile) this.dom.requestPointerLock?.();
+    else this.locked = true;
   }
 
   _unlock() { document.exitPointerLock?.(); }
 
-  // ── Mobile ────────────────────────────────────────────────
   _initMobile() {
     const base  = document.getElementById('joystick-base');
     const thumb = document.getElementById('joystick-thumb');
 
-    const onJoyStart = e => {
+    base.addEventListener('touchstart', e => {
       const t = e.changedTouches[0];
       this.joy = { active: true, startX: t.clientX, startY: t.clientY, dx: 0, dy: 0 };
       e.preventDefault();
-    };
-    const onJoyMove = e => {
+    }, { passive: false });
+
+    document.addEventListener('touchmove', e => {
       if (!this.joy.active) return;
-      const t = e.changedTouches[0];
-      const dx = t.clientX - this.joy.startX;
-      const dy = t.clientY - this.joy.startY;
+      const t    = e.changedTouches[0];
+      const dx   = t.clientX - this.joy.startX;
+      const dy   = t.clientY - this.joy.startY;
       const dist = Math.min(Math.sqrt(dx*dx + dy*dy), 36);
       const ang  = Math.atan2(dy, dx);
       this.joy.dx = Math.cos(ang) * dist / 36;
       this.joy.dy = Math.sin(ang) * dist / 36;
       thumb.style.transform = `translate(${Math.cos(ang)*dist*0.5}px,${Math.sin(ang)*dist*0.5}px)`;
       e.preventDefault();
-    };
-    const onJoyEnd = () => {
-      this.joy = { active: false, startX:0, startY:0, dx:0, dy:0 };
+    }, { passive: false });
+
+    document.addEventListener('touchend', () => {
+      this.joy = { active: false, startX: 0, startY: 0, dx: 0, dy: 0 };
       thumb.style.transform = '';
-    };
+    });
 
-    base.addEventListener('touchstart', onJoyStart, { passive: false });
-    document.addEventListener('touchmove',  onJoyMove,  { passive: false });
-    document.addEventListener('touchend',   onJoyEnd);
-
-    // Right-side drag = look
     document.addEventListener('touchstart', e => {
       const t = e.changedTouches[0];
-      if (t.clientX > window.innerWidth * 0.35) {
-        this.look = { active: true, startX: t.clientX, startY: t.clientY, prevX: t.clientX, prevY: t.clientY };
-      }
+      if (t.clientX > window.innerWidth * 0.35)
+        this.look = { active: true, prevX: t.clientX, prevY: t.clientY };
     }, { passive: true });
+
     document.addEventListener('touchmove', e => {
       if (!this.look.active) return;
       const t = e.changedTouches[0];
-      const dx = t.clientX - this.look.prevX;
-      const dy = t.clientY - this.look.prevY;
-      this.euler.y -= dx * LOOK_SENS * 1.5;
-      this.euler.x -= dy * LOOK_SENS * 1.5;
-      this.euler.x  = Math.max(-Math.PI * 0.38, Math.min(Math.PI * 0.38, this.euler.x));
-      this.camera.quaternion.setFromEuler(this.euler);
+      this._yawObject.rotation.y   -= (t.clientX - this.look.prevX) * LOOK_SENS * 1.5;
+      this._pitchObject.rotation.x -= (t.clientY - this.look.prevY) * LOOK_SENS * 1.5;
+      this._pitchObject.rotation.x  = Math.max(-PI_2 + 0.01, Math.min(PI_2 - 0.01, this._pitchObject.rotation.x));
       this.look.prevX = t.clientX;
       this.look.prevY = t.clientY;
     }, { passive: true });
+
     document.addEventListener('touchend', () => { this.look.active = false; });
   }
 
-  // ── Update (call every frame) ──────────────────────────────
   update(boundsMinZ, boundsMaxZ) {
     if (!this.locked) return;
 
     const { dir, right, flat } = this._tmp;
+
+    // ทิศที่กล้องหัน (world space)
     this.camera.getWorldDirection(dir);
     flat.set(dir.x, 0, dir.z).normalize();
-    right.crossVectors(flat, new THREE.Vector3(0, 1, 0)).negate();
+    right.crossVectors(flat, new THREE.Vector3(0, 1, 0)).normalize();
 
-    // Desktop keys
-    if (this.keys['KeyW'] || this.keys['ArrowUp'])    this.camera.position.addScaledVector(flat, SPEED);
-    if (this.keys['KeyS'] || this.keys['ArrowDown'])  this.camera.position.addScaledVector(flat, -SPEED);
-    if (this.keys['KeyA'] || this.keys['ArrowLeft'])  this.camera.position.addScaledVector(right, -SPEED);
-    if (this.keys['KeyD'] || this.keys['ArrowRight']) this.camera.position.addScaledVector(right, SPEED);
+    const pos = this._yawObject.position;
 
-    // Mobile joystick
+    if (this.keys['KeyW'] || this.keys['ArrowUp'])    pos.addScaledVector(flat,   SPEED);
+    if (this.keys['KeyS'] || this.keys['ArrowDown'])  pos.addScaledVector(flat,  -SPEED);
+    if (this.keys['KeyA'] || this.keys['ArrowLeft'])  pos.addScaledVector(right, -SPEED);
+    if (this.keys['KeyD'] || this.keys['ArrowRight']) pos.addScaledVector(right,  SPEED);
+
     if (this.joy.active) {
-      this.camera.position.addScaledVector(flat,  -this.joy.dy * MOBILE_SPEED);
-      this.camera.position.addScaledVector(right,  this.joy.dx * MOBILE_SPEED);
+      pos.addScaledVector(flat,  -this.joy.dy * MOBILE_SPEED);
+      pos.addScaledVector(right,  this.joy.dx * MOBILE_SPEED);
     }
 
-    // Clamp to corridor
-    this.camera.position.x = Math.max(-3.5, Math.min(3.5, this.camera.position.x));
-    this.camera.position.z = Math.max(boundsMinZ, Math.min(boundsMaxZ, this.camera.position.z));
-    this.camera.position.y = 1.65; // fixed eye height
+    // Jump physics
+    this._velY -= GRAVITY;
+    pos.y += this._velY;
+    if (pos.y <= EYE_HEIGHT) {
+      pos.y          = EYE_HEIGHT;
+      this._velY     = 0;
+      this._onGround = true;
+    }
+
+    pos.x = Math.max(-4.0, Math.min(4.0, pos.x));
+    pos.z = Math.max(boundsMinZ, Math.min(boundsMaxZ, pos.z));
   }
 
-  // Smoothly set camera look direction toward a target point
+  // หันกล้องไปหา target (ใช้โดย tour.js)
   lookAt(target) {
-    const dir = new THREE.Vector3().subVectors(target, this.camera.position).normalize();
-    this.euler.y = Math.atan2(-dir.x, -dir.z);
-    this.euler.x = Math.asin(Math.max(-1, Math.min(1, dir.y)));
-    this.camera.quaternion.setFromEuler(this.euler);
+    const pos = this._yawObject.position;
+    const dx  = target.x - pos.x;
+    const dz  = target.z - pos.z;
+    const dy  = target.y - pos.y;
+    const hDist = Math.sqrt(dx*dx + dz*dz);
+
+    this._yawObject.rotation.y   = Math.atan2(-dx, -dz);
+    this._pitchObject.rotation.x = Math.atan2(dy, hDist);
   }
 }

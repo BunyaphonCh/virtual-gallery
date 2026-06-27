@@ -2,8 +2,8 @@ import { ARTWORKS } from './artworks.js';
 import { ARTWORK_POSITIONS } from './gallery.js';
 import { drawInfoThumb } from './artworks.js';
 
-const FLY_DURATION = 1200; // ms
-const VIEW_DIST    = 2.0;  // meters in front of artwork
+const FLY_DURATION = 1200;
+const VIEW_DIST    = 2.0;
 
 export class ArtworkViewer {
   constructor(camera, controls, renderer, scene) {
@@ -12,24 +12,21 @@ export class ArtworkViewer {
     this.renderer  = renderer;
     this.scene     = scene;
     this.raycaster = new THREE.Raycaster();
-    this.mouse     = new THREE.Vector2();
 
-    this.flying       = false;
-    this.flyStart     = 0;
-    this.flyFromPos   = new THREE.Vector3();
-    this.flyToPos     = new THREE.Vector3();
-    this.flyFromQuat  = new THREE.Quaternion();
-    this.flyToQuat    = new THREE.Quaternion();
+    this.flying      = false;
+    this.flyStart    = 0;
+    this.flyFromPos  = new THREE.Vector3();
+    this.flyToPos    = new THREE.Vector3();
+    this.flyToYaw    = 0;
+    this.flyFromYaw  = 0;
     this.currentIndex = -1;
+    this.artworkMeshes = [];
 
-    this.artworkMeshes = []; // filled by setMeshes()
-
-    // DOM
-    this.panel      = document.getElementById('info-panel');
-    this.closeBtn   = document.getElementById('info-close');
-    this.prevBtn    = document.getElementById('info-prev');
-    this.nextBtn    = document.getElementById('info-next');
-    this.thumb      = document.getElementById('info-thumb');
+    this.panel    = document.getElementById('info-panel');
+    this.closeBtn = document.getElementById('info-close');
+    this.prevBtn  = document.getElementById('info-prev');
+    this.nextBtn  = document.getElementById('info-next');
+    this.thumb    = document.getElementById('info-thumb');
     this.thumb.width  = 340;
     this.thumb.height = 200;
 
@@ -37,7 +34,6 @@ export class ArtworkViewer {
   }
 
   setMeshes(frames) {
-    // frames is array of THREE.Group; collect the PlaneGeometry child (artwork surface)
     this.artworkMeshes = [];
     frames.forEach(group => {
       group.traverse(child => {
@@ -51,16 +47,14 @@ export class ArtworkViewer {
     this.prevBtn.addEventListener('click',  () => this._navigate(-1));
     this.nextBtn.addEventListener('click',  () => this._navigate(1));
 
-    // Desktop click
-    this.renderer.domElement.addEventListener('click', e => {
+    this.renderer.domElement.addEventListener('click', () => {
       if (!this.controls.locked || this.flying) return;
-      this._trySelect(0.5, 0.5); // screen center (pointer-locked)
+      this._trySelect(0.5, 0.5);
     });
 
-    // Mobile tap
     this.renderer.domElement.addEventListener('touchend', e => {
       if (this.flying) return;
-      const t = e.changedTouches[0];
+      const t  = e.changedTouches[0];
       const nx = t.clientX / window.innerWidth  * 2 - 1;
       const ny = -(t.clientY / window.innerHeight) * 2 + 1;
       this._trySelect((nx + 1) / 2, (1 - ny) / 2);
@@ -68,14 +62,10 @@ export class ArtworkViewer {
   }
 
   _trySelect(nx, ny) {
-    this.raycaster.setFromCamera(
-      new THREE.Vector2(nx * 2 - 1, -(ny * 2 - 1)),
-      this.camera
-    );
+    this.raycaster.setFromCamera(new THREE.Vector2(nx*2-1, -(ny*2-1)), this.camera);
     const hits = this.raycaster.intersectObjects(this.artworkMeshes);
     if (hits.length && hits[0].distance < 6) {
-      const idx = hits[0].object.userData.artIndex;
-      this._openArtwork(idx);
+      this._openArtwork(hits[0].object.userData.artIndex);
     }
   }
 
@@ -83,70 +73,67 @@ export class ArtworkViewer {
     this.currentIndex = index;
     this._showPanel(index);
     this._flyToArtwork(index);
-    // Unlock pointer so user can interact with panel
     document.exitPointerLock?.();
     this.controls.locked = false;
   }
 
   _flyToArtwork(index) {
-    const pos  = ARTWORK_POSITIONS[index];
-    const side = pos.side;
-
-    // Target position: in front of the artwork
+    const pos    = ARTWORK_POSITIONS[index];
+    const side   = pos.side;
     const offsetX = side === 'left' ? VIEW_DIST : -VIEW_DIST;
+
     this.flyToPos.set(pos.x + offsetX, 1.65, pos.z);
+    // yaw target = หันเข้าหาภาพ
+    const dx = pos.x - this.flyToPos.x;
+    const dz = pos.z - this.flyToPos.z;
+    this.flyToYaw = Math.atan2(-dx, -dz);
 
-    // Target look quaternion: face the artwork
-    const lookDir = new THREE.Vector3(
-      side === 'left' ? -1 : 1, 0, 0
-    );
-    const lookQ = new THREE.Quaternion();
-    const up = new THREE.Vector3(0, 1, 0);
-    const mat = new THREE.Matrix4().lookAt(
-      this.flyToPos,
-      new THREE.Vector3(pos.x, 1.65, pos.z),
-      up
-    );
-    lookQ.setFromRotationMatrix(mat);
-
-    this.flyFromPos.copy(this.camera.position);
-    this.flyFromQuat.copy(this.camera.quaternion);
-    this.flyToQuat.copy(lookQ);
-    this.flyStart = performance.now();
-    this.flying   = true;
+    this.flyFromPos.copy(this.controls.position);
+    this.flyFromYaw   = this.controls._yawObject.rotation.y;
+    this.flyFromPitch = this.controls._pitchObject.rotation.x;
+    this.flyStart     = performance.now();
+    this.flying       = true;
   }
 
   update() {
     if (!this.flying) return;
 
     const elapsed = performance.now() - this.flyStart;
-    const t = Math.min(elapsed / FLY_DURATION, 1);
-    const ease = t < 0.5 ? 2*t*t : -1+(4-2*t)*t; // ease-in-out quad
+    const t    = Math.min(elapsed / FLY_DURATION, 1);
+    const ease = t < 0.5 ? 2*t*t : -1+(4-2*t)*t;
 
-    this.camera.position.lerpVectors(this.flyFromPos, this.flyToPos, ease);
-    this.camera.quaternion.slerpQuaternions(this.flyFromQuat, this.flyToQuat, ease);
+    // เลื่อน yawObject position (ตำแหน่งจริงของกล้อง)
+    this.controls.position.lerpVectors(this.flyFromPos, this.flyToPos, ease);
 
-    if (t >= 1) this.flying = false;
+    let yawDiff = this.flyToYaw - this.flyFromYaw;
+    if (yawDiff >  Math.PI) yawDiff -= Math.PI * 2;
+    if (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
+    this.controls._yawObject.rotation.y = this.flyFromYaw + yawDiff * ease;
+
+    // reset pitch → 0 (มองตรง) อย่างนุ่มนวล
+    this.controls._pitchObject.rotation.x = this.flyFromPitch * (1 - ease);
+
+    if (t >= 1) {
+      this.controls._pitchObject.rotation.x = 0;
+      this.flying = false;
+    }
   }
 
   _showPanel(index) {
     const art = ARTWORKS[index];
-    document.getElementById('info-num').textContent       = `NO. ${String(art.id).padStart(2, '0')} / 16`;
+    document.getElementById('info-num').textContent       = `NO. ${String(art.id).padStart(2,'0')} / 16`;
     document.getElementById('info-title').textContent     = art.title;
     document.getElementById('info-artist').textContent    = art.artist;
     document.getElementById('info-year').textContent      = art.year;
     document.getElementById('info-technique').textContent = art.technique;
     document.getElementById('info-desc').textContent      = art.desc;
-
     drawInfoThumb(art, this.thumb);
-
     this.panel.classList.add('open');
   }
 
   _closePanel() {
     this.panel.classList.remove('open');
     this.currentIndex = -1;
-    // Re-lock controls
     this.controls.lock();
   }
 

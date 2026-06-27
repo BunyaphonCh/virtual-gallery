@@ -26,7 +26,7 @@ export class Minimap {
 
     // Corridor world bounds (from gallery.js)
     this.worldZ0 = 0;
-    this.worldZ1 = -80;
+    this.worldZ1 = -44;
     this.worldX0 = -5;
     this.worldX1 =  5;
   }
